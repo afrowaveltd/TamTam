@@ -1,179 +1,255 @@
 # TamTam
+**Minimalistic Realtime Communication Engine**  
+with **Safari Bus** transport model 🐘🚌
 
-**A minimalistic, resilient, transport-agnostic communication engine built around deterministic message circulation.**
+TamTam is a low-level, platform-agnostic communication engine designed for reliable message passing, large data transfers, and real-time streaming across heterogeneous systems, from modern servers to legacy NAS devices and bare-metal environments.
 
-**TamTam** is a resilient, transport-agnostic communication system designed around a simple but powerful idea:
-messages circulate in controlled cycles, nothing is lost until work is finished, and the system remains usable even on very limited hardware.
-
-TamTam is built to be:
-- minimalistic,
-- deterministic,
-- highly portable,
-- and fully documented down to the last bit.
-
-It can run on servers, embedded devices, old NAS machines, browsers, or inside a single process.
+TamTam is not a framework.  
+TamTam is a **bus**.
 
 ---
 
-## Mental Model
+## Core Philosophy
+- **Minimalistic, but not limiting**
+- **Byte-level first** (payload is always raw bytes)
+- **Disk-first, RAM-optional** (works on low-memory systems)
+- **Deterministic behavior**
+- **Everything is a message**
+- **One architecture, many transports** (network, serial, IPC, file, memory)
 
-TamTam follows a **roundabout model**:
-
-- messages are **cars**
-- nodes are **roads leading to cities**
-- ports are **lanes**
-- the roundabout is the **communication bus**
-- the orchestrator is the **traffic officer**
-- acknowledgements are **proof that the car passed safely**
-
-Every message enters the roundabout, is routed according to its destination, and leaves only when its job is confirmed as done.
-
-Nothing disappears silently.
-
----
-
-## Core Concepts
-
-### Node
-A node is any participant in the system.
-A node may send messages, receive messages, and expose services.
-
-Each node contains:
-- a **disk queue** (persistent, unlimited by RAM),
-- a **RAM buffer** (small, controlled working set),
-- a **transport adapter** (TCP, WebSocket, file, pipe, in-memory),
-- a set of **port handlers** (services).
-
----
-
-### Orchestrator
-The orchestrator is the **gate** of the roundabout.
-
-It:
-- controls message circulation cycles,
-- schedules traffic fairly,
-- requests acknowledgements and resends,
-- enforces timeouts and audits.
-
-The orchestrator **never stores payload data**.
-It only works with lightweight descriptors.
-
-Security and authentication are handled **outside** of TamTam.
-
----
-
-### Port
-A port represents a **service**, not a network port.
-
-- Each service listens on a port number.
-- Ports define routing.
-- Broadcast, group and unicast are all supported.
-
----
-
-### Message and Parts
-A **message** is a logical request or response.
-
-If the payload is large, the message is automatically split into **parts**:
-- all parts have the same size (except the last),
-- parts are acknowledged individually,
-- parts are reassembled disk-first.
-
-This allows transfers of extremely large data even with very small RAM.
-
----
-
-## Reliability Principles
-
-TamTam follows one strict rule:
-
-> **No data may be removed from memory or disk until the operation is fully confirmed.**
-
-- acknowledgements are explicit,
-- resends are deterministic,
-- failures always end in a known state.
-
-A physical disconnect may interrupt a request.
-Nothing else should.
-
----
-
-## Streaming Mode
-
-TamTam supports streaming messages:
-
-- stream packets are broadcast-style,
-- they do not require acknowledgements by default,
-- each stream packet has a limited lifetime measured in **roundabout passes (TTL)**.
-
-This prevents infinite circulation while keeping the system simple.
-
----
-
-## Transport-Agnostic Design
-
-TamTam does not depend on any specific transport.
-
-It can run over:
-- TCP
+TamTam can run over:
+- TCP / UDP
 - WebSocket
-- Unix domain sockets
-- named pipes
-- shared memory
-- files and removable media
-- in-memory queues
-
-The same protocol logic applies everywhere.
+- Serial line
+- Shared memory
+- File-based transport
+- Custom embedded links
 
 ---
 
-## Specification and Portability
+## Safari Bus
+TamTam uses a **three-lane transport model** called **Safari Bus**.
 
-TamTam is designed to be implemented in **any programming language**.
+### 🟢 Fast Lane (Couriers & Motorbikes)
+- Single-packet messages
+- ACK required
+- Low latency
+- Control messages, chat, TTY input, ACK/ERR/AUDIT
+- Always prioritized
 
-The protocol is:
-- precisely specified,
-- byte-level documented,
-- supported by test vectors.
+### 🟡 Bulk Lane (Cargo Trucks)
+- Multi-packet (segmented) messages
+- ACK required
+- Large data transfers (IMG, dataswap, big objects)
+- Disk-first processing
+- Fairness enforced
 
-A moderately experienced programmer should be able to implement TamTam without using any official library.
-
----
-
-## Typical Use Cases
-
-- internal application event bus
-- microservice communication without heavy brokers
-- embedded and NAS devices
-- air-gapped environments
-- large data transfers with minimal RAM
-- real-time dashboards over WebSocket
-- distributed orchestration systems
-
----
-
-## Project Structure (planned)
-
-- **Protocol specification** (wire format, message lifecycle)
-- **Reference implementations** (C, C#)
-- **Additional ports** (Python, JavaScript)
-- **Test vectors and benchmarks**
-- **Telemetry and diagnostics tools**
+### 🔵 Stream Lane (Flow)
+- No ACK
+- Terminator-controlled lifetime (TTL / phase)
+- Video, audio, live logs, stdout streaming
+- Receiver drains immediately
+- Limited lifetime (default: 3–5 cycles)
 
 ---
 
-## Philosophy
+## Cycle Model (Tram Stop Model)
+Each TamTam cycle behaves like a tram stop:
 
-TamTam values:
-- clarity over magic,
-- determinism over guesswork,
-- resilience over speed,
-- simplicity over convenience.
+1. **Deliver phase**
+   - Messages exit the bus
+   - Middleware runs first (Logger, Reporter)
+   - Application handlers consume messages
 
-If you can send a signal and receive an echo, TamTam can work there.
+2. **Commit phase**
+   - New messages, ACKs, resends enter the bus
+   - No handler may block the cycle
+
+Minimum latency is **one cycle**.  
+Cycle speed is adaptive and controlled by the orchestrator.
 
 ---
 
-🥁  
-*TamTam calls. Someone answers.*
+## Roles & Processing Order
+Roles are processed **from lowest priority to highest**, with **Orchestrator always last**.
+
+| Role ID | Role |
+|------|------|
+| 0 | Orchestrator |
+| 1 | Logger (middleware tee) |
+| 2 | Reporter / Metrics |
+| 3–10 | System services |
+| 11–100 | Middleware |
+| 101+ | Application / Translation |
+
+---
+
+## Port Architecture
+Ports are logical service identifiers, not network ports.
+
+### Reserved Port Ranges
+- **0** – Orchestrator
+- **1–10** – System services (Logger, Reporter, Discovery)
+- **11–100** – Middleware
+- **101–1000** – Language translation ports
+- **1001–1100** – AI translation ports (fallback / on-demand)
+
+### Translation Example
+- `port 150` → Translate to Czech
+- `port 234` → Translate to French
+- `port 1001` → AI Translator (Ollama fallback)
+
+If no server handles a language port, the request is routed to AI.
+
+---
+
+## Reliability Model
+- ACK for **all messages except stream**
+- Multipart ACK supported
+- Resend & audit supported
+- Dead-man activity detection
+- Automatic priority aging (no starvation)
+
+---
+
+## Stream Model (with Terminator)
+Streams are multicast-like and managed in two phases:
+
+1. **Discovery**
+   - Orchestrator discovers listeners
+   - Assigns one node as **Terminator**
+
+2. **Flow**
+   - Stream frames circulate
+   - Terminator controls lifecycle (TTL / phase)
+   - Frames removed deterministically
+
+Each receiver keeps a small cache of recently seen stream tokens.
+
+---
+
+## Payload Format
+TamTam transports **raw bytes** only.
+
+Optionally, payloads may use **TPF – TamTam Payload Format**:
+- Canonical binary encoding
+- Schema-driven
+- Endianness defined
+- Cross-language (C ↔ C#)
+- Enables `SendMessage<T>` safely
+
+Transport and payload are strictly separated.
+
+---
+
+## Logging, Telemetry & Diagnostics
+Telemetry is just another message flow.
+
+### System Ports
+- **Logger (1)** – log & forward middleware
+- **Reporter (2)** – metrics & progress reporting
+
+Supports:
+- Bus stats
+- Node stats
+- Transfer progress (percent, rate, ETA)
+- Debug tracing
+- SignalR / HTTP bridges
+
+---
+
+## Fairness & Backpressure
+- Max consecutive messages per recipient (default: 10)
+- Max bus share per service (default: 80%)
+- Reserved capacity for overload recovery (default: 20%)
+- Slow consumers never block the system
+
+---
+
+## Supported Use Cases
+- Reliable messaging
+- Large file / disk image transfer (IMG)
+- Data swap between systems
+- Live video / audio streaming
+- Distributed translation orchestration
+- Chat (user / group / broadcast)
+- Remote terminal (stdin/stdout over TamTam)
+- Monitoring & diagnostics
+- Embedded / legacy system communication
+
+---
+
+## Repository Structure
+```text
+/ TamTam
+├── spec/
+│   ├── model/
+│   │   ├── SafariBus-v1.md
+│   │   ├── Cycle-v1.md
+│   │   ├── Fairness-v1.md
+│   │   └── Stream-v1.md
+│   ├── payload/
+│   │   └── TPF-v1.md
+│   ├── registry/
+│   │   ├── Ports-v1.md
+│   │   └── LanguagePorts-v1.md
+│   └── usecases/
+│       ├── TranslationOrchestration-v1.md
+│       └── ChatAndTTY-v1.md
+│
+├── src/
+│   ├── c/
+│   └── dotnet/
+│
+├── examples/
+│   ├── img_swap/
+│   ├── translation_bus/
+│   └── chat_and_tty/
+│
+└── README.md
+```
+
+---
+
+## Examples (minimum set)
+### 1️⃣ IMG Swap
+- Two disk images exchanged block-by-block
+- Bulk lane + ACK
+- Disk-first
+- Progress reported via Reporter
+
+### 2️⃣ Translation Bus
+- Multiple LibreTranslate servers
+- Language ports 101–1000
+- AI fallback on 1001+
+- Yield-style result streaming
+
+### 3️⃣ Chat & Remote TTY
+- User / group / broadcast ports
+- Live stdout streaming
+- Keyboard input over Fast Lane
+
+---
+
+## Project Status
+This repository currently contains:
+- **Architecture & protocol design**
+- **Normative specifications**
+- **Reference roadmap**
+
+Reference implementations (C / C#) follow the spec strictly.
+
+---
+
+## Final Note
+TamTam is intentionally **simple at the wire level**  
+and **powerful at the system level**.
+
+It is designed to survive:
+- slow hardware
+- bad networks
+- long runtimes
+- real production chaos
+
+> **If it can survive a safari, it can survive production.** 🐘🚌
 
