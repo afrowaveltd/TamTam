@@ -1,4 +1,6 @@
 # TamTam
+**Minimalistic Realtime Communication Engine**  
+with **Safari Bus** transport model 🐘🚌
 
 **A minimalistic, resilient, transport-agnostic communication engine built around deterministic message circulation and explicit interchange routing.**
 
@@ -18,7 +20,8 @@ It is minimalistic, deterministic, highly portable, and documented down to the b
 
 ---
 
-## Mental Model
+## Safari Bus
+TamTam uses a **three-lane transport model** called **Safari Bus**.
 
 TamTam follows a **roundabout (interchange) model**:
 
@@ -110,7 +113,10 @@ A **port** represents a service, not a network socket.
 * Unicast, group, and broadcast are supported.
 * Port semantics are local to a link.
 
----
+### Translation Example
+- `port 150` → Translate to Czech
+- `port 234` → Translate to French
+- `port 1001` → AI Translator (Ollama fallback)
 
 ## Messages and Parts
 
@@ -126,11 +132,17 @@ This allows reliable transfer of extremely large data with minimal RAM.
 
 ---
 
-## Reliability Principles
+## Stream Model (with Terminator)
+Streams are multicast-like and managed in two phases:
 
-TamTam follows one strict rule:
+1. **Discovery**
+   - Orchestrator discovers listeners
+   - Assigns one node as **Terminator**
 
-> **No data may be removed from memory or disk until the operation is fully confirmed.**
+2. **Flow**
+   - Stream frames circulate
+   - Terminator controls lifecycle (TTL / phase)
+   - Frames removed deterministically
 
 * acknowledgements are explicit,
 * retries are deterministic,
@@ -141,21 +153,27 @@ Nothing else should.
 
 ---
 
-## Streaming Mode
+## Payload Format
+TamTam transports **raw bytes** only.
 
-TamTam supports streaming messages:
+Optionally, payloads may use **TPF – TamTam Payload Format**:
+- Canonical binary encoding
+- Schema-driven
+- Endianness defined
+- Cross-language (C ↔ C#)
+- Enables `SendMessage<T>` safely
 
 * stream packets are broadcast-style,
 * acknowledgements are optional,
 * lifetime is bounded by **interchange passes (TTL)**.
 
-This prevents infinite circulation while keeping the system simple.
-
 ---
 
 ## Transport-Agnostic by Design
 
-TamTam does not depend on any specific transport.
+### System Ports
+- **Logger (1)** – log & forward middleware
+- **Reporter (2)** – metrics & progress reporting
 
 It can run over:
 
@@ -189,6 +207,12 @@ The ecosystem is designed so that:
 
 can be added without modifying the core specification.
 
+## Fairness & Backpressure
+- Max consecutive messages per recipient (default: 10)
+- Max bus share per service (default: 80%)
+- Reserved capacity for overload recovery (default: 20%)
+- Slow consumers never block the system
+
 ---
 
 ## Specification & Interoperability
@@ -206,7 +230,18 @@ If you can send bytes and receive bytes, TamTam can run there.
 
 ---
 
-## Typical Use Cases
+## Examples (minimum set)
+### 1️⃣ IMG Swap
+- Two disk images exchanged block-by-block
+- Bulk lane + ACK
+- Disk-first
+- Progress reported via Reporter
+
+### 2️⃣ Translation Bus
+- Multiple LibreTranslate servers
+- Language ports 101–1000
+- AI fallback on 1001+
+- Yield-style result streaming
 
 * distributed event buses
 * microservice communication without heavy brokers
@@ -218,7 +253,11 @@ If you can send bytes and receive bytes, TamTam can run there.
 
 ---
 
-## Project Structure (planned)
+## Project Status
+This repository currently contains:
+- **Architecture & protocol design**
+- **Normative specifications**
+- **Reference roadmap**
 
 * **Protocol specification**
 * **Reference orchestrators (C#, C)**
@@ -240,7 +279,11 @@ TamTam values:
 
 If two systems can exchange bytes, TamTam can connect them.
 
----
+It is designed to survive:
+- slow hardware
+- bad networks
+- long runtimes
+- real production chaos
 
 🥁
 *TamTam calls. Anyone may answer.*
